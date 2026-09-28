@@ -6,6 +6,7 @@ import {
 	canApplyRewrite,
 	canUndoRewrite,
 	cleanOutput,
+	COMMAND_ROOTS,
 	draftFrom,
 	MAX_UNDO_ENTRIES,
 	MODE_LABELS,
@@ -23,22 +24,26 @@ interface UndoEntry {
 	rewritten: string;
 }
 
-const MODES: Array<{ name: string; mode: PolishMode; shortcut: string; description: string }> = [
+const MODES: Array<{
+	mode: PolishMode;
+	suffix?: string;
+	shortcut: string;
+	description: string;
+}> = [
 	{
-		name: "polish",
 		mode: "polish",
 		shortcut: Key.alt("p"),
 		description: "Polish the editor prompt, translating Turkish prose when needed (Alt+P)",
 	},
 	{
-		name: "polish:fix",
 		mode: "fix",
+		suffix: "fix",
 		shortcut: Key.alt("e"),
 		description: "Fix editor prompt spelling, grammar, and punctuation only (Alt+E)",
 	},
 	{
-		name: "polish:translate",
 		mode: "translate",
+		suffix: "translate",
 		shortcut: Key.alt("t"),
 		description: "Translate Turkish or mixed prompt prose to technical English (Alt+T)",
 	},
@@ -178,21 +183,27 @@ function undo(ctx: ExtensionContext): void {
 }
 
 export default function promptPolishExtension(pi: ExtensionAPI) {
-	for (const { name, mode, shortcut, description } of MODES) {
-		pi.registerCommand(name, {
-			description,
-			handler: (args, ctx) => execute(mode, args, ctx),
-		});
+	for (const { mode, suffix, shortcut, description } of MODES) {
+		for (const root of COMMAND_ROOTS) {
+			pi.registerCommand(suffix ? `${root}:${suffix}` : root, {
+				description,
+				handler: (args, ctx) => execute(mode, args, ctx),
+			});
+		}
+
 		pi.registerShortcut(shortcut, {
 			description,
 			handler: (ctx) => execute(mode, "", ctx),
 		});
 	}
 
-	pi.registerCommand("polish:undo", {
-		description: `Undo the last prompt rewrite (${UNDO_SHORTCUT})`,
-		handler: (_args, ctx) => undo(ctx),
-	});
+	for (const root of COMMAND_ROOTS) {
+		pi.registerCommand(`${root}:undo`, {
+			description: `Undo the last prompt rewrite (${UNDO_SHORTCUT})`,
+			handler: (_args, ctx) => undo(ctx),
+		});
+	}
+
 	pi.registerShortcut(UNDO_SHORTCUT, {
 		description: "Undo the last prompt rewrite",
 		handler: (ctx) => undo(ctx),

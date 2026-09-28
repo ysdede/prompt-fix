@@ -65,6 +65,17 @@ test("strips fences, preambles, and whole-answer quoting", () => {
 	assert.equal(cleanOutput("  Rewrite this prompt  "), "Rewrite this prompt");
 });
 
+test("collapses a rewrite the model echoed as quoted text followed by the bare text", () => {
+	assert.equal(
+		cleanOutput('"Fix the graph and run the tests."Fix the graph and run the tests.'),
+		"Fix the graph and run the tests.",
+	);
+	assert.equal(
+		cleanOutput('"Rewrite this prompt"Rewrite something else'),
+		'"Rewrite this prompt"Rewrite something else',
+	);
+});
+
 test("keeps quoting that is part of the draft", () => {
 	assert.equal(cleanOutput('He said "no" and "yes"'), 'He said "no" and "yes"');
 	assert.equal(cleanOutput('"quoted line"\nsecond line'), '"quoted line"\nsecond line');
@@ -91,6 +102,8 @@ test("an explicit /polish argument wins over the editor draft", () => {
 	assert.equal(draftFrom("/polish:translate  merhaba dünya", ""), "merhaba dünya");
 	assert.equal(draftFrom("/polish", ""), "");
 	assert.equal(draftFrom("/polish:undo", ""), "");
+	assert.equal(draftFrom("/promptfix:translate  merhaba dünya", ""), "merhaba dünya");
+	assert.equal(draftFrom("/pp", ""), "");
 });
 
 test("the command prefix never eats a lookalike command", () => {
@@ -98,4 +111,8 @@ test("the command prefix never eats a lookalike command", () => {
 	assert.equal("/polishx".replace(COMMAND_PREFIX, ""), "/polishx");
 	assert.equal("/polish:unknown hello".replace(COMMAND_PREFIX, ""), "/polish:unknown hello");
 	assert.equal("/polish:fix hi".replace(COMMAND_PREFIX, ""), "hi");
+	assert.equal("/promptfix:fix hi".replace(COMMAND_PREFIX, ""), "hi");
+	assert.equal("/pp hi".replace(COMMAND_PREFIX, ""), "hi");
+	assert.equal("/promptfixing hi".replace(COMMAND_PREFIX, ""), "/promptfixing hi");
+	assert.equal("/pp:unknown hi".replace(COMMAND_PREFIX, ""), "/pp:unknown hi");
 });

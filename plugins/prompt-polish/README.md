@@ -4,12 +4,16 @@ An [omp](https://github.com/oh-my-pi) extension that rewrites the prompt sitting
 model call **inside the omp process**. No `pi.exec`, no child `omp` process, no prompt sent to a
 separate CLI.
 
-| Command            | Shortcut     | Effect                                                                        |
-| ------------------ | ------------ | ----------------------------------------------------------------------------- |
-| `/polish`          | `Alt+P`      | Conservative polish: fix language errors, translate Turkish/mixed prose to English |
-| `/polish:fix`      | `Alt+E`      | Spelling, grammar, and punctuation only; keeps the input language              |
-| `/polish:translate`| `Alt+T`      | Minimal Turkish/mixed → technical English translation                          |
-| `/polish:undo`     | `Alt+Shift+U`| Restore the draft from before the last rewrite                                  |
+| Command             | Shortcut     | Effect                                                                        |
+| ------------------- | ------------ | ----------------------------------------------------------------------------- |
+| `/polish`           | `Alt+P`      | Conservative polish: fix language errors, translate Turkish/mixed prose to English |
+| `/polish:fix`       | `Alt+E`      | Spelling, grammar, and punctuation only; keeps the input language              |
+| `/polish:translate` | `Alt+T`      | Minimal Turkish/mixed → technical English translation                          |
+| `/polish:undo`      | `Alt+Shift+U`| Restore the draft from before the last rewrite                                  |
+
+`/promptfix` and `/pp` are aliases: every command above is also available as
+`/promptfix…` and `/pp…` (for example `/pp:translate <text>`). Use whichever root
+you have in muscle memory.
 
 `/polish <text>` rewrites the argument instead of the editor content, so it works when the editor is
 empty (and in RPC mode, where the editor buffer is always empty).

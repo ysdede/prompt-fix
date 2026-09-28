@@ -1,6 +1,6 @@
 {
 	"name": "omp-prompt-polish",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "OMP extension that rewrites the prompt in the editor: grammar/spelling fix, Turkish-to-English translation, and undo.",
 	"license": "MIT",
 	"type": "module",

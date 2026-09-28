@@ -5,9 +5,12 @@ export const PROMPTFIX_ROLE = "promptfix";
 /**
  * Matches any promptfix slash command, including the mode suffix, so a command
  * typed into a non-empty editor is stripped instead of being rewritten as text.
- * The lookahead keeps lookalikes (`/polishing`, `/polish:unknown`) intact.
+ * Every command root is accepted: `/polish`, `/promptfix`, `/pp`. The lookahead
+ * keeps lookalikes (`/polishing`, `/polish:unknown`, `/pp2`) intact.
  */
-export const COMMAND_PREFIX = /^\/polish(?::(?:fix|translate|undo))?(?![:\w])\s*/;
+export const COMMAND_PREFIX = /^\/(?:promptfix|polish|pp)(?::(?:fix|translate|undo))?(?![:\w])\s*/;
+
+export const COMMAND_ROOTS = ["polish", "promptfix", "pp"] as const;
 
 export const MAX_UNDO_ENTRIES = 25;
 
@@ -59,6 +62,11 @@ export function cleanOutput(raw: string): string {
 	if (fenced?.[1] !== undefined) text = fenced[1].trim();
 
 	text = text.replace(/^(?:here(?:'s| is)\b[^\n:]*:|rewritten (?:prompt|text|version)\s*:)\s*/i, "").trim();
+
+	// A model that returns the quoted rewrite and then repeats it bare (`"X"X`)
+	// still gave one answer; keep the quoted form's content.
+	const echoed = /^(["'\u201c])([^\n"'\u201c\u201d]+)\1[\s:]*\2[.!?]?$/.exec(text);
+	if (echoed?.[2] !== undefined) text = echoed[2].trim();
 
 	if (text.length >= 2) {
 		const first = text[0];
