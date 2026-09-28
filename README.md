@@ -7,14 +7,14 @@ An [omp](https://github.com/oh-my-pi) plugin marketplace, plus the `prompt-polis
 ### As a marketplace (recommended)
 
 ```
-/marketplace add yd-zd/omp-prompt-polish
+/marketplace add ysdede/omp-prompt-polish
 /marketplace install prompt-polish@omp-prompt-polish
 ```
 
 From the shell:
 
 ```
-omp plugin marketplace add yd-zd/omp-prompt-polish
+omp plugin marketplace add ysdede/omp-prompt-polish
 omp plugin install prompt-polish@omp-prompt-polish
 ```
 
@@ -23,7 +23,7 @@ Add `--scope project` to install only for the current project.
 ### Straight from git
 
 ```
-omp plugin install github:yd-zd/omp-prompt-polish
+omp plugin install github:ysdede/omp-prompt-polish
 ```
 
 ### Manually

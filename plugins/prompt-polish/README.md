@@ -21,14 +21,14 @@ The extension only ever writes the editor text. It never submits a turn.
 From the marketplace (recommended):
 
 ```
-/marketplace add yd-zd/omp-prompt-polish
+/marketplace add ysdede/omp-prompt-polish
 /marketplace install prompt-polish@omp-prompt-polish
 ```
 
 Or straight from git:
 
 ```
-omp plugin install github:yd-zd/omp-prompt-polish
+omp plugin install github:ysdede/omp-prompt-polish
 ```
 
 Or copy the extension directory into `~/.omp/agent/extensions/prompt-polish/` (or
