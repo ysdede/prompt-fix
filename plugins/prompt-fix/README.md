@@ -1,4 +1,4 @@
-# prompt-polish
+# prompt-fix
 
 An [omp](https://github.com/oh-my-pi) extension that rewrites the prompt sitting in the editor, using a
 model call **inside the omp process**. No `pi.exec`, no child `omp` process, no prompt sent to a
@@ -25,18 +25,18 @@ The extension only ever writes the editor text. It never submits a turn.
 From the marketplace (recommended):
 
 ```
-/marketplace add ysdede/omp-prompt-polish
-/marketplace install prompt-polish@omp-prompt-polish
+/marketplace add ysdede/prompt-fix
+/marketplace install prompt-fix@prompt-fix
 ```
 
 Or straight from git:
 
 ```
-omp plugin install github:ysdede/omp-prompt-polish
+omp plugin install github:ysdede/prompt-fix
 ```
 
-Or copy the extension directory into `~/.omp/agent/extensions/prompt-polish/` (or
-`<project>/.omp/extensions/prompt-polish/`) — the directory contains `index.ts`, which is what omp
+Or copy the extension directory into `~/.omp/agent/extensions/prompt-fix/` (or
+`<project>/.omp/extensions/prompt-fix/`) — the directory contains `index.ts`, which is what omp
 auto-discovers.
 
 **Restart the omp session after installing.** Extension modules are loaded when a session starts;

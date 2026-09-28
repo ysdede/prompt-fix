@@ -1,6 +1,6 @@
 {
-	"name": "omp-prompt-polish",
-	"version": "0.1.1",
+	"name": "prompt-fix",
+	"version": "0.1.2",
 	"description": "OMP extension that rewrites the prompt in the editor: grammar/spelling fix, Turkish-to-English translation, and undo.",
 	"license": "MIT",
 	"type": "module",
@@ -26,8 +26,8 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ysdede/omp-prompt-polish.git"
+		"url": "git+https://github.com/ysdede/prompt-fix.git"
 	},
-	"homepage": "https://github.com/ysdede/omp-prompt-polish#readme",
-	"bugs": "https://github.com/ysdede/omp-prompt-polish/issues"
+	"homepage": "https://github.com/ysdede/prompt-fix#readme",
+	"bugs": "https://github.com/ysdede/prompt-fix/issues"
 }
