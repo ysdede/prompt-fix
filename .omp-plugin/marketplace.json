@@ -1,0 +1,36 @@
+{
+	"$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+	"name": "omp-prompt-polish",
+	"owner": {
+		"name": "yunus.dede"
+	},
+	"metadata": {
+		"description": "Plugins for the omp coding agent.",
+		"version": "0.1.0",
+		"pluginRoot": "./plugins"
+	},
+	"plugins": [
+		{
+			"name": "prompt-polish",
+			"version": "0.1.0",
+			"description": "Rewrite the prompt in the editor: conservative polish, grammar/spelling fix, Turkish-to-English translation, and conditional undo.",
+			"source": "./prompt-polish",
+			"category": "productivity",
+			"license": "MIT",
+			"keywords": [
+				"prompt",
+				"grammar",
+				"translation",
+				"turkish",
+				"editor"
+			],
+			"tags": [
+				"prompt",
+				"writing",
+				"i18n"
+			],
+			"homepage": "https://github.com/yd-zd/omp-prompt-polish",
+			"repository": "https://github.com/yd-zd/omp-prompt-polish"
+		}
+	]
+}

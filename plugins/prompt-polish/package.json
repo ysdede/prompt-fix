@@ -1,0 +1,33 @@
+{
+	"name": "omp-prompt-polish",
+	"version": "0.1.0",
+	"description": "OMP extension that rewrites the prompt in the editor: grammar/spelling fix, Turkish-to-English translation, and undo.",
+	"license": "MIT",
+	"type": "module",
+	"keywords": [
+		"omp",
+		"oh-my-pi",
+		"pi",
+		"extension",
+		"prompt",
+		"grammar",
+		"translation"
+	],
+	"scripts": {
+		"test": "node --test core.test.ts"
+	},
+	"omp": {
+		"extensions": ["./index.ts"]
+	},
+	"files": [
+		"index.ts",
+		"core.ts",
+		"README.md"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/yd-zd/omp-prompt-polish.git"
+	},
+	"homepage": "https://github.com/yd-zd/omp-prompt-polish#readme",
+	"bugs": "https://github.com/yd-zd/omp-prompt-polish/issues"
+}
