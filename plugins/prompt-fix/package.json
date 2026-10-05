@@ -1,6 +1,6 @@
 {
 	"name": "prompt-fix",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"description": "OMP extension that rewrites the prompt in the editor: grammar/spelling fix, Turkish-to-English translation, and undo.",
 	"license": "MIT",
 	"type": "module",

@@ -136,7 +136,6 @@ function candidate(overrides: Partial<Candidate> & { selector: string }): Candid
 		inputPerMTok: 1,
 		outputPerMTok: 2,
 		priced: true,
-		local: false,
 		reasoning: false,
 		contextWindow: 200_000,
 		...overrides,
@@ -239,12 +238,7 @@ test("every free candidate carries a caveat, and only shared-tier names mention 
 	assert.equal(caveatFor(candidate({ selector: "zai/glm", inputPerMTok: 1, outputPerMTok: 1 })), undefined);
 });
 
-test("a model on the user's own LAN gets no provider caveat", () => {
-	const lan = candidate({ selector: "lama225/qwen3.8-27b", inputPerMTok: 0, outputPerMTok: 0, local: true });
-	assert.equal(caveatFor(lan), undefined);
-});
-
-test("local hosts are recognised without flagging real providers", () => {
+test("local hosts are recognised so discovery can skip them", () => {
 	for (const url of [
 		"http://172.16.0.225:8083/v1",
 		"http://172.16.1.11:8083/v1",

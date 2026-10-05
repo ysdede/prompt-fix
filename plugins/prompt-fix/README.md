@@ -82,6 +82,9 @@ nothing). Bare, it opens a picker; with a selector it sets the role without a di
 /polish:model commandcode/inclusionai/ling-3.0-flash-sante:free
 ```
 
+Local models are skipped: a server on loopback or a private address is not a hosted model, so it is
+neither listed nor settable through the picker. Edit `modelRoles.promptfix` directly for those.
+
 > **A zero-cost label is not a guarantee.** The registry lists models as free that their providers
 > reject — three OpenRouter `:free` entries returned `404 … unavailable for free`, and one
 > `commandcode` entry answered `insufficient credits`. `/polish:model` shows a caveat with every

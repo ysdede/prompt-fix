@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5
+
+- Local models are skipped by `/polish:model` instead of being offered as
+  candidates. A llama.cpp server on the LAN is not a hosted model, so it no longer
+  appears in the list — and `/polish:model lama225/qwen3.8-27b` is refused rather
+  than written. Set a local model by editing `modelRoles.promptfix` directly if you
+  want one.
+
 ## 0.1.4
 
 Fixes from a review of 0.1.3. Three of these were silent — the wrong result

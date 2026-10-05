@@ -129,16 +129,14 @@ export interface Candidate {
 	outputPerMTok: number;
 	/** False when the registry reports no cost: `0` must not be read as free. */
 	priced: boolean;
-	/** A server on loopback or a private network, which cannot reject or rate-limit you. */
-	local: boolean;
 	reasoning: boolean;
 	contextWindow: number;
 }
 
 /**
  * Loopback and RFC1918 hosts are the user's own boxes — a llama.cpp server on the
- * LAN cannot reject a request the way a hosted provider can, and it is not a
- * shared tier, so it must not attract the free-tier caveat.
+ * LAN is not a hosted model, so discovery skips it rather than offering it as a
+ * candidate for a hosted rewrite.
  */
 export function isLocalBaseUrl(baseUrl: string | undefined): boolean {
 	if (baseUrl === undefined || baseUrl.length === 0) return false;
@@ -228,7 +226,6 @@ export function formatCandidate(candidate: Candidate, currentSelector?: string):
 	const flags = [
 		price,
 		ctx,
-		candidate.local ? "local" : null,
 		candidate.reasoning ? "reasoning" : null,
 		candidate.selector === currentSelector ? "current" : null,
 	].filter((part): part is string => part !== null);
@@ -245,8 +242,6 @@ export function benchLine(result: BenchResult): string {
 /** A zero-cost label is not a promise; say so before someone relies on one. */
 export function caveatFor(candidate: Candidate): string | undefined {
 	if (!isFree(candidate)) return undefined;
-	// A model on the user's own LAN is not a shared tier and cannot reject them.
-	if (candidate.local) return undefined;
 	if (candidate.selector.includes("openrouter/") && candidate.selector.endsWith(":free")) {
 		return "OpenRouter :free models are shared-tier and rate-limited, and a zero-cost label can list a model the provider rejects — run /bench before relying on one.";
 	}

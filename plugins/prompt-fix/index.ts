@@ -217,6 +217,8 @@ function rankedFrom(ctx: ExtensionContext): {
 	const bySelector = new Map<string, Model<Api>>();
 	const candidates: Candidate[] = [];
 	for (const model of registryModels(ctx)) {
+		// Local servers are not hosted models; leave them out of the candidate set.
+		if (isLocalBaseUrl(model.baseUrl)) continue;
 		const selector = `${model.provider}/${model.id}`;
 		bySelector.set(selector, model);
 		candidates.push({
@@ -224,7 +226,6 @@ function rankedFrom(ctx: ExtensionContext): {
 			inputPerMTok: model.cost?.input ?? 0,
 			outputPerMTok: model.cost?.output ?? 0,
 			priced: typeof model.cost?.input === "number" && typeof model.cost?.output === "number",
-			local: isLocalBaseUrl(model.baseUrl),
 			reasoning: model.reasoning === true,
 			contextWindow: model.contextWindow ?? 0,
 		});
