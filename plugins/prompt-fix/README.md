@@ -73,46 +73,19 @@ preambles, point the role at a fast instruct model.
 
 ### Finding a free or cheap model
 
-`/polish:model` reads the models your own registry can actually reach and ranks them: zero-cost
-first, then cheapest, then non-reasoning (a 4096-token text edit spends its budget on thinking for
-nothing). Bare, it opens a picker; with a selector it sets the role without a dialog:
+`/polish:model` ranks the models your registry can reach: free first, then cheapest, then
+non-reasoning. Bare it opens a picker; with a selector it sets the role directly. A `:high`-style
+effort suffix is accepted and the model still shows as `current`.
 
 ```
 /polish:model
 /polish:model commandcode/inclusionai/ling-3.0-flash-sante:free
 ```
 
-Local models are skipped: a server on loopback or a private address is not a hosted model, so it is
-neither listed nor settable through the picker. Edit `modelRoles.promptfix` directly for those.
-
-> **A zero-cost label is not a guarantee.** The registry lists models as free that their providers
-> reject — three OpenRouter `:free` entries returned `404 … unavailable for free`, and one
-> `commandcode` entry answered `insufficient credits`. `/polish:model` shows a caveat with every
-> free pick for that reason.
-
-`/polish:bench` is how you find out for real: it runs the same sample rewrite through the top-ranked
-models and reports measured latency beside the text each one produced.
-
-```
-Rewrite of "fix this and add test" by 4 models:
-6.1s · commandcode/inclusionai/ling-3.1-flash:free — "Fix this and add a test."
-25.4s · commandcode/poolside/laguna-s-2.1-free — "Fix this and add a test."
-```
-
-Bench costs one small call per candidate and runs them in sequence, so it can take a minute or two.
-It is the only speed measurement available: the registry reports pricing and context size but no
-throughput, so the ranking deliberately does not claim to know which model is fastest.
-
-A role value may carry an effort suffix and still be recognised as current:
-`/polish:model opencode-go/deepseek-flash:high` is accepted, and the model is marked `current` in the
-list even though the suffix is not part of the registry selector.
-
-**What the ranking does not know.** It sorts on price, context size, and the reasoning flag, so the
-only fitness signal it has is price. The list is capped at 12 and the free tier is alphabetical
-within it, which means a cheap but unsuitable model can appear near the top — a tab-completion model
-like `google-antigravity/tab_flash_lite_preview` (16k context) is zero-cost and ranks alongside real
-chat models, and a zero-cost entry whose provider has run out of credit ranks first until bench
-disproves it. Treat the list as candidates to bench, not as a recommendation.
+`/polish:bench` runs the same sample rewrite through the top-ranked models and reports latency and
+output. A zero-cost label is not a guarantee — three OpenRouter `:free` models returned `404
+unavailable for free` and one `commandcode` model answered `insufficient credits` — so bench a
+candidate before trusting it.
 
 ### 2. Free `Alt+P` (optional)
 
