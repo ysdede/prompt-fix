@@ -55,19 +55,39 @@ export function userMessageFor(input: string): string {
 	return JSON.stringify(input);
 }
 
-/** Drops fences, quoting, and conversational preambles the model may add anyway. */
-export function cleanOutput(raw: string): string {
+const PREAMBLE = /^(?:here(?:'s| is)\b[^\n:]*:|rewritten (?:prompt|text|version)\s*:)\s*/i;
+const FENCED = /^```[^\n]*\n([\s\S]*?)\n?```$/;
+
+/**
+ * Drops fences, quoting, and conversational preambles the model may add anyway.
+ *
+ * Fences and preambles are stripped in two passes, because a model that writes
+ * "Here is the prompt:" and then fences the answer defeats either order alone:
+ * the fence is not at the start until the preamble is gone, and the preamble is
+ * not at the start until the fence is gone.
+ *
+ * `draft` guards the preamble strip. A draft that opens with the same words —
+ * "Here is the error: …" — otherwise has that opener deleted from the result,
+ * silently losing text the user wrote.
+ */
+export function cleanOutput(raw: string, draft?: string): string {
 	let text = raw.trim();
 
-	const fenced = /^```[^\n]*\n([\s\S]*?)\n?```$/.exec(text);
-	if (fenced?.[1] !== undefined) text = fenced[1].trim();
+	for (let pass = 0; pass < 2; pass++) {
+		const fenced = FENCED.exec(text);
+		if (fenced?.[1] !== undefined) text = fenced[1].trim();
 
-	text = text.replace(/^(?:here(?:'s| is)\b[^\n:]*:|rewritten (?:prompt|text|version)\s*:)\s*/i, "").trim();
+		const preamble = PREAMBLE.exec(text);
+		const fromDraft =
+			preamble !== null && draft !== undefined && draft.trim().startsWith(preamble[0].trimEnd());
+		if (preamble !== null && !fromDraft) text = text.slice(preamble[0].length).trim();
+	}
 
 	// A model that returns the quoted rewrite and then repeats it bare (`"X"X`)
-	// still gave one answer; keep the quoted form's content.
-	const echoed = /^(["'\u201c])([^\n"'\u201c\u201d]+)\1[\s:]*\2[.!?]?$/.exec(text);
-	if (echoed?.[2] !== undefined) text = echoed[2].trim();
+	// still gave one answer; keep the quoted form's content. The closing quote may
+	// differ from the opener, so the delimiters are alternatives, not a backreference.
+	const echoed = /^(?:"|'|\u201c)([^\n"'\u201c\u201d]+)(?:"|'|\u201d)[\s:]*\1[.!?]?$/.exec(text);
+	if (echoed?.[1] !== undefined) text = echoed[1].trim();
 
 	if (text.length >= 2) {
 		const first = text[0];
@@ -104,11 +124,44 @@ export function draftFrom(editorText: string, commandArgs: string): string {
 /** A priced chat model as the registry exposes it, flattened for ranking. */
 export interface Candidate {
 	selector: string;
-	/** USD per million tokens; `0` means free. */
+	/** USD per million tokens; meaningless unless `priced`. */
 	inputPerMTok: number;
 	outputPerMTok: number;
+	/** False when the registry reports no cost: `0` must not be read as free. */
+	priced: boolean;
+	/** A server on loopback or a private network, which cannot reject or rate-limit you. */
+	local: boolean;
 	reasoning: boolean;
 	contextWindow: number;
+}
+
+/**
+ * Loopback and RFC1918 hosts are the user's own boxes — a llama.cpp server on the
+ * LAN cannot reject a request the way a hosted provider can, and it is not a
+ * shared tier, so it must not attract the free-tier caveat.
+ */
+export function isLocalBaseUrl(baseUrl: string | undefined): boolean {
+	if (baseUrl === undefined || baseUrl.length === 0) return false;
+
+	let host: string;
+	try {
+		host = new URL(baseUrl).hostname;
+	} catch {
+		return false;
+	}
+	// URL.hostname keeps the brackets around an IPv6 literal.
+	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	if (host === "localhost" || host === "::1" || host.endsWith(".localhost")) return true;
+
+	const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+	if (octets === null) return false;
+
+	const first = Number(octets[1]);
+	const second = Number(octets[2]);
+	if (first === 10 || first === 127) return true;
+	if (first === 172 && second >= 16 && second <= 31) return true;
+	if (first === 192 && second === 168) return true;
+	return first === 169 && second === 254;
 }
 
 /** One measured rewrite, which is the only real speed signal available. */
@@ -123,8 +176,14 @@ export interface BenchResult {
 export const MAX_CANDIDATES = 12;
 export const BENCH_SAMPLE = "fix this and add test";
 
-function isFree(candidate: Candidate): boolean {
-	return candidate.inputPerMTok === 0 && candidate.outputPerMTok === 0;
+export function isFree(candidate: Candidate): boolean {
+	return candidate.priced && candidate.inputPerMTok === 0 && candidate.outputPerMTok === 0;
+}
+
+/** 0 free, 1 known price, 2 no price data at all. */
+function priceBucket(candidate: Candidate): number {
+	if (isFree(candidate)) return 0;
+	return candidate.priced ? 1 : 2;
 }
 
 /**
@@ -136,8 +195,8 @@ function isFree(candidate: Candidate): boolean {
  * throughput, so `/bench` measures it instead.
  */
 function compareCandidates(a: Candidate, b: Candidate): number {
-	const freeDelta = Number(isFree(b)) - Number(isFree(a));
-	if (freeDelta !== 0) return freeDelta;
+	const bucketDelta = priceBucket(a) - priceBucket(b);
+	if (bucketDelta !== 0) return bucketDelta;
 
 	const priceDelta =
 		(a.inputPerMTok + a.outputPerMTok) / 2 - (b.inputPerMTok + b.outputPerMTok) / 2;
@@ -157,7 +216,9 @@ export function rankCandidates(models: Candidate[], limit = MAX_CANDIDATES): Can
 export function formatCandidate(candidate: Candidate, currentSelector?: string): string {
 	const price = isFree(candidate)
 		? "free"
-		: `$${candidate.inputPerMTok}/$${candidate.outputPerMTok} per Mtok`;
+		: candidate.priced
+			? `$${candidate.inputPerMTok}/$${candidate.outputPerMTok} per Mtok`
+			: "price unknown";
 	const ctx =
 		candidate.contextWindow <= 0
 			? "ctx unknown"
@@ -167,6 +228,7 @@ export function formatCandidate(candidate: Candidate, currentSelector?: string):
 	const flags = [
 		price,
 		ctx,
+		candidate.local ? "local" : null,
 		candidate.reasoning ? "reasoning" : null,
 		candidate.selector === currentSelector ? "current" : null,
 	].filter((part): part is string => part !== null);
@@ -183,6 +245,8 @@ export function benchLine(result: BenchResult): string {
 /** A zero-cost label is not a promise; say so before someone relies on one. */
 export function caveatFor(candidate: Candidate): string | undefined {
 	if (!isFree(candidate)) return undefined;
+	// A model on the user's own LAN is not a shared tier and cannot reject them.
+	if (candidate.local) return undefined;
 	if (candidate.selector.includes("openrouter/") && candidate.selector.endsWith(":free")) {
 		return "OpenRouter :free models are shared-tier and rate-limited, and a zero-cost label can list a model the provider rejects — run /bench before relying on one.";
 	}

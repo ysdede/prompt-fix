@@ -100,6 +100,17 @@ Bench costs one small call per candidate and runs them in sequence, so it can ta
 It is the only speed measurement available: the registry reports pricing and context size but no
 throughput, so the ranking deliberately does not claim to know which model is fastest.
 
+A role value may carry an effort suffix and still be recognised as current:
+`/polish:model opencode-go/deepseek-flash:high` is accepted, and the model is marked `current` in the
+list even though the suffix is not part of the registry selector.
+
+**What the ranking does not know.** It sorts on price, context size, and the reasoning flag, so the
+only fitness signal it has is price. The list is capped at 12 and the free tier is alphabetical
+within it, which means a cheap but unsuitable model can appear near the top — a tab-completion model
+like `google-antigravity/tab_flash_lite_preview` (16k context) is zero-cost and ranks alongside real
+chat models, and a zero-cost entry whose provider has run out of credit ranks first until bench
+disproves it. Treat the list as candidates to bench, not as a recommendation.
+
 ### 2. Free `Alt+P` (optional)
 
 omp ships `app.model.selectTemporary` bound to `alt+p`, which shadows the `/polish` shortcut. Remap

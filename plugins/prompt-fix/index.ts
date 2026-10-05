@@ -14,6 +14,7 @@ import {
 	COMMAND_ROOTS,
 	draftFrom,
 	formatCandidate,
+	isLocalBaseUrl,
 	MAX_UNDO_ENTRIES,
 	MODE_LABELS,
 	PROMPTFIX_ROLE,
@@ -26,6 +27,8 @@ import {
 } from "./core.ts";
 
 const STATUS_KEY = "promptfix";
+// Distinct from STATUS_KEY so a bench and a rewrite can never erase each other's line.
+const BENCH_STATUS_KEY = "promptfix-bench";
 const REQUEST_TIMEOUT_MS = 60_000;
 
 interface UndoEntry {
@@ -129,7 +132,7 @@ function requireEditor(ctx: ExtensionContext): boolean {
 async function execute(mode: PolishMode, args: string, ctx: ExtensionContext): Promise<void> {
 	if (!requireEditor(ctx)) return;
 	if (rewriting) {
-		ctx.ui.notify("A prompt rewrite is already running", "warning");
+		ctx.ui.notify("A rewrite or bench is already running", "warning");
 		return;
 	}
 
@@ -143,7 +146,7 @@ async function execute(mode: PolishMode, args: string, ctx: ExtensionContext): P
 	rewriting = true;
 	ctx.ui.setStatus(STATUS_KEY, `Rewriting prompt (${MODE_LABELS[mode]})\u2026`);
 	try {
-		const rewritten = cleanOutput(await requestRewrite(mode, draft, ctx));
+		const rewritten = cleanOutput(await requestRewrite(mode, draft, ctx), draft);
 		const current = ctx.ui.getEditorText();
 
 		if (!canApplyRewrite(snapshot, current)) {
@@ -220,6 +223,8 @@ function rankedFrom(ctx: ExtensionContext): {
 			selector,
 			inputPerMTok: model.cost?.input ?? 0,
 			outputPerMTok: model.cost?.output ?? 0,
+			priced: typeof model.cost?.input === "number" && typeof model.cost?.output === "number",
+			local: isLocalBaseUrl(model.baseUrl),
 			reasoning: model.reasoning === true,
 			contextWindow: model.contextWindow ?? 0,
 		});
@@ -227,11 +232,24 @@ function rankedFrom(ctx: ExtensionContext): {
 	return { candidates: rankCandidates(candidates), bySelector };
 }
 
+/** The effort suffix a role value may carry, which a registry selector never does. */
+const EFFORT_SUFFIX = /:(?:off|minimal|low|medium|high|xhigh|max)$/i;
+
+/**
+ * Drops a known effort suffix so a role value can be compared against registry
+ * selectors. Only known effort names are stripped, since real ids end in things
+ * like `:free`.
+ */
+function withoutEffort(value: string): string {
+	return EFFORT_SUFFIX.test(value) ? value.replace(EFFORT_SUFFIX, "") : value;
+}
+
 function currentSelector(pi: ExtensionAPI): string | undefined {
 	const roles = lookup("modelRoles")?.get(pi.pi.settings);
 	if (typeof roles !== "object" || roles === null) return undefined;
 	const value = (roles as Record<string, unknown>)[PROMPTFIX_ROLE];
-	return typeof value === "string" ? value : undefined;
+	if (typeof value !== "string") return undefined;
+	return withoutEffort(value);
 }
 
 function setSelector(pi: ExtensionAPI, selector: string): void {
@@ -251,12 +269,14 @@ async function pickModel(pi: ExtensionAPI, args: string, ctx: ExtensionContext):
 	const requested = args.trim();
 
 	if (requested) {
-		if (!bySelector.has(requested)) {
+		// The effort suffix is part of the role value but not of the registry
+		// selector, so it is stripped for validation and kept when persisted.
+		if (!bySelector.has(withoutEffort(requested))) {
 			ctx.ui.notify(`${requested} is not an available model`, "error");
 			return;
 		}
 		setSelector(pi, requested);
-		ctx.ui.notify(`@${PROMPTFIX_ROLE} is now ${requested}`, "info");
+		notifyRole(ctx, withoutEffort(requested), candidates);
 		return;
 	}
 
@@ -265,27 +285,46 @@ async function pickModel(pi: ExtensionAPI, args: string, ctx: ExtensionContext):
 		return;
 	}
 
-	let picked: string | undefined;
+	// `select` is positional — an options object throws inside the host — and the
+	// host echoes the chosen option string back, so the strings offered here are
+	// display labels that have to be mapped back to their selector.
+	const labelToSelector = new Map(
+		candidates.map((candidate) => [formatCandidate(candidate, current), candidate.selector]),
+	);
+	let chosen: unknown;
 	try {
-		picked = await ctx.ui.select({
-			message: `Model for @${PROMPTFIX_ROLE}${current === undefined ? "" : ` (now ${current})`}`,
-			options: candidates.map((candidate) => ({
-				label: formatCandidate(candidate, current),
-				value: candidate.selector,
-			})),
-		});
-	} catch {
-		// The select shape varies across omp builds; the list is always usable.
+		chosen = await ctx.ui.select(
+			`Model for @${PROMPTFIX_ROLE}${current === undefined ? "" : ` (now ${current})`}`,
+			[...labelToSelector.keys()],
+		);
+	} catch (error) {
+		const reason = error instanceof Error && error.message ? error.message : String(error);
+		ctx.ui.notify(`Model picker unavailable (${reason}); pick from the list below.`, "warning");
 		ctx.ui.notify(listCandidates(candidates, current), "info");
 		return;
 	}
-	if (picked === undefined) return;
+
+	// Builds differ on what a successful select resolves to, so accept a display
+	// label, something carrying a selector, or a bare selector, and require the
+	// result to be a model we actually offered before persisting anything.
+	const picked =
+		typeof chosen === "string"
+			? (labelToSelector.get(chosen) ?? (bySelector.has(chosen) ? chosen : undefined))
+			: typeof chosen === "object" && chosen !== null && typeof (chosen as { value?: unknown }).value === "string"
+				? ((chosen as { value: string }).value)
+				: undefined;
+	if (picked === undefined || !bySelector.has(picked)) return;
 
 	setSelector(pi, picked);
-	const chosen = candidates.find((candidate) => candidate.selector === picked);
+	notifyRole(ctx, picked, candidates);
+}
+
+/** Sets the role once, whoever chose it, and always carries the caveat with it. */
+function notifyRole(ctx: ExtensionContext, selector: string, candidates: Candidate[]): void {
+	const chosen = candidates.find((candidate) => candidate.selector === selector);
 	const caveat = chosen === undefined ? undefined : caveatFor(chosen);
 	ctx.ui.notify(
-		caveat === undefined ? `@${PROMPTFIX_ROLE} is now ${picked}` : `@${PROMPTFIX_ROLE} is now ${picked}. ${caveat}`,
+		caveat === undefined ? `@${PROMPTFIX_ROLE} is now ${selector}` : `@${PROMPTFIX_ROLE} is now ${selector}. ${caveat}`,
 		caveat === undefined ? "info" : "warning",
 	);
 }
@@ -298,8 +337,15 @@ async function benchModels(pi: ExtensionAPI, ctx: ExtensionContext): Promise<voi
 		ctx.ui.notify("No other ranked models to bench", "info");
 		return;
 	}
+	// A bench spends the same credentials a rewrite uses, so it takes the same
+	// single-flight guard rather than racing one. Its status uses its own key.
+	if (rewriting) {
+		ctx.ui.notify("A rewrite or bench is already running", "warning");
+		return;
+	}
 
-	ctx.ui.setStatus(STATUS_KEY, `Benching ${shortlist.length} models…`);
+	rewriting = true;
+	ctx.ui.setStatus(BENCH_STATUS_KEY, `Benching ${shortlist.length} models…`);
 	const results: BenchResult[] = [];
 	try {
 		for (const candidate of shortlist) {
@@ -307,7 +353,7 @@ async function benchModels(pi: ExtensionAPI, ctx: ExtensionContext): Promise<voi
 			if (model === undefined) continue;
 			const started = Date.now();
 			try {
-				const output = cleanOutput(await rewriteWith(model, "fix", BENCH_SAMPLE, ctx));
+				const output = cleanOutput(await rewriteWith(model, "fix", BENCH_SAMPLE, ctx), BENCH_SAMPLE);
 				results.push({ selector: candidate.selector, ms: Date.now() - started, output });
 			} catch (error) {
 				const reason = error instanceof Error && error.message ? error.message : String(error);
@@ -315,7 +361,8 @@ async function benchModels(pi: ExtensionAPI, ctx: ExtensionContext): Promise<voi
 			}
 		}
 	} finally {
-		ctx.ui.setStatus(STATUS_KEY, undefined);
+		ctx.ui.setStatus(BENCH_STATUS_KEY, undefined);
+		rewriting = false;
 	}
 
 	const header = `Rewrite of "${BENCH_SAMPLE}" by ${shortlist.length} models:`;

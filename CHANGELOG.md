@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.4
+
+Fixes from a review of 0.1.3. Three of these were silent — the wrong result
+arrived with no error.
+
+- **The model picker now works.** `ctx.ui.select` is positional; it was being
+  called with an options object, which threw inside the host and was swallowed by
+  a catch-all that fell back to a text list. The picker never opened.
+- **`cleanOutput` no longer deletes the draft's own opening line.** A draft like
+  `Here is the error: TypeError: …` had `Here is the error:` stripped out of the
+  result, because the preamble stripper could not tell the model's opener from the
+  user's. It now takes the draft and leaves the user's words alone.
+- **A preamble in front of a fenced answer is cleaned.** Both orders now strip,
+  where previously the literal ``` reached the editor.
+- **The echo collapse handles typographic quotes.** `“X”X` never matched, because
+  the closing quote had to equal the opening one.
+- **Free-tier caveats are no longer attached to local models.** A llama.cpp server
+  on the LAN is not a shared tier and cannot reject a request.
+- **A model with no price data is no longer ranked as free.** It is labelled
+  `price unknown` and sorted after every known price.
+- **`provider/id:high` works on the explicit path and still marks as current**, so
+  bench no longer re-measures the model already in use.
+- **The picker validates its result** against the models it offered before writing
+  anything, so a cancelled or unusual dialog cannot persist a null or a number.
+- **Bench takes the single-flight guard** and uses its own status key, so a bench
+  and a rewrite can no longer erase each other's progress line.
+
 ## 0.1.3
 
 - New `/polish:model` (also `/promptfix:model`, `/pp:model`): ranks the chat

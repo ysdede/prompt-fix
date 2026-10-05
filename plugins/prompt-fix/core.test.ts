@@ -9,6 +9,8 @@ import {
 	COMMAND_PREFIX,
 	draftFrom,
 	formatCandidate,
+	isFree,
+	isLocalBaseUrl,
 	MAX_UNDO_ENTRIES,
 	MODE_LABELS,
 	PROMPTFIX_ROLE,
@@ -133,6 +135,8 @@ function candidate(overrides: Partial<Candidate> & { selector: string }): Candid
 	return {
 		inputPerMTok: 1,
 		outputPerMTok: 2,
+		priced: true,
+		local: false,
 		reasoning: false,
 		contextWindow: 200_000,
 		...overrides,
@@ -233,4 +237,80 @@ test("every free candidate carries a caveat, and only shared-tier names mention 
 		/rate-limited/,
 	);
 	assert.equal(caveatFor(candidate({ selector: "zai/glm", inputPerMTok: 1, outputPerMTok: 1 })), undefined);
+});
+
+test("a model on the user's own LAN gets no provider caveat", () => {
+	const lan = candidate({ selector: "lama225/qwen3.8-27b", inputPerMTok: 0, outputPerMTok: 0, local: true });
+	assert.equal(caveatFor(lan), undefined);
+});
+
+test("local hosts are recognised without flagging real providers", () => {
+	for (const url of [
+		"http://172.16.0.225:8083/v1",
+		"http://172.16.1.11:8083/v1",
+		"http://localhost:8080/v1",
+		"http://127.0.0.1:1234/v1",
+		"http://10.1.2.3/v1",
+		"http://192.168.1.50:8080/v1",
+		"http://169.254.10.10/v1",
+		"http://[::1]:8080/v1",
+	]) {
+		assert.equal(isLocalBaseUrl(url), true, url);
+	}
+	for (const url of [
+		"https://api.commandcode.ai/provider",
+		"https://api2.cursor.sh",
+		"https://api.z.ai/api/anthropic",
+		"http://172.32.0.1/v1",
+		"http://11.0.0.1/v1",
+		"http://192.169.0.1/v1",
+		undefined,
+		"not a url",
+	]) {
+		assert.equal(isLocalBaseUrl(url), false, String(url));
+	}
+});
+
+test("a model with no price data is not treated as free and ranks last", () => {
+	const unpriced = candidate({ selector: "mystery/unpriced", priced: false, inputPerMTok: 0, outputPerMTok: 0 });
+	assert.equal(isFree(unpriced), false);
+	assert.equal(formatCandidate(unpriced), "price unknown · 200k ctx — mystery/unpriced");
+
+	const ranked = rankCandidates([
+		unpriced,
+		candidate({ selector: "paid/mid", inputPerMTok: 1, outputPerMTok: 1 }),
+		candidate({ selector: "free/known", inputPerMTok: 0, outputPerMTok: 0 }),
+	]);
+	assert.deepEqual(
+		ranked.map((c) => c.selector),
+		["free/known", "paid/mid", "mystery/unpriced"],
+	);
+});
+
+test("the preamble strip never deletes an opener the draft itself used", () => {
+	// No draft supplied: the model's own preamble is still removed.
+	assert.equal(cleanOutput("Here is the rewritten prompt:\nRewrite this prompt"), "Rewrite this prompt");
+
+	// The draft opens the same way, so those words are the user's and must survive.
+	const draft = "Here is the error: TypeError: x is not a function";
+	assert.equal(cleanOutput(draft, draft), draft);
+	assert.equal(
+		cleanOutput("Here is the error:\nTypeError: x is not a function", draft),
+		"Here is the error:\nTypeError: x is not a function",
+	);
+
+	// A draft that merely looks similar does not block stripping the model's own opener.
+	assert.equal(cleanOutput("Here is the rewritten prompt:\nfix the parser", "fix the parser"), "fix the parser");
+});
+
+test("a preamble followed by a fenced answer is cleaned in either order", () => {
+	assert.equal(cleanOutput("Here is the prompt:\n```\nfix the parser\n```"), "fix the parser");
+	assert.equal(cleanOutput("```\nHere is the prompt:\nfix the parser\n```"), "fix the parser");
+	assert.equal(cleanOutput("```\nfix the parser\n```"), "fix the parser");
+});
+
+test("the echo collapse also handles typographic quotes", () => {
+	assert.equal(cleanOutput('"Fix the parser"Fix the parser'), "Fix the parser");
+	assert.equal(cleanOutput("\u201cFix the parser\u201dFix the parser"), "Fix the parser");
+	assert.equal(cleanOutput("'Fix the parser'Fix the parser"), "Fix the parser");
 });
