@@ -8,7 +8,8 @@ export const PROMPTFIX_ROLE = "promptfix";
  * Every command root is accepted: `/polish`, `/promptfix`, `/pp`. The lookahead
  * keeps lookalikes (`/polishing`, `/polish:unknown`, `/pp2`) intact.
  */
-export const COMMAND_PREFIX = /^\/(?:promptfix|polish|pp)(?::(?:fix|translate|undo))?(?![:\w])\s*/;
+export const COMMAND_PREFIX =
+	/^\/(?:promptfix|polish|pp)(?::(?:fix|translate|undo|model|bench))?(?![:\w])\s*/;
 
 export const COMMAND_ROOTS = ["polish", "promptfix", "pp"] as const;
 
@@ -98,4 +99,92 @@ export function draftFrom(editorText: string, commandArgs: string): string {
 	const explicit = commandArgs.replace(COMMAND_PREFIX, "").trim();
 	if (explicit.length > 0) return explicit;
 	return editorText.replace(COMMAND_PREFIX, "").trim();
+}
+
+/** A priced chat model as the registry exposes it, flattened for ranking. */
+export interface Candidate {
+	selector: string;
+	/** USD per million tokens; `0` means free. */
+	inputPerMTok: number;
+	outputPerMTok: number;
+	reasoning: boolean;
+	contextWindow: number;
+}
+
+/** One measured rewrite, which is the only real speed signal available. */
+export interface BenchResult {
+	selector: string;
+	/** Wall-clock milliseconds for the rewrite call. */
+	ms: number;
+	output: string;
+	error?: string;
+}
+
+export const MAX_CANDIDATES = 12;
+export const BENCH_SAMPLE = "fix this and add test";
+
+function isFree(candidate: Candidate): boolean {
+	return candidate.inputPerMTok === 0 && candidate.outputPerMTok === 0;
+}
+
+/**
+ * Orders candidates the way the rewrite role wants them: free before paid,
+ * cheaper before pricier (averaging input and output price, close enough to rank
+ * short rewrites without pretending to be a real cost model), then
+ * non-reasoning before reasoning — a 4096-token text edit spends its budget on
+ * thinking for nothing. Speed is deliberately absent: the registry reports no
+ * throughput, so `/bench` measures it instead.
+ */
+function compareCandidates(a: Candidate, b: Candidate): number {
+	const freeDelta = Number(isFree(b)) - Number(isFree(a));
+	if (freeDelta !== 0) return freeDelta;
+
+	const priceDelta =
+		(a.inputPerMTok + a.outputPerMTok) / 2 - (b.inputPerMTok + b.outputPerMTok) / 2;
+	if (priceDelta !== 0) return priceDelta;
+
+	const reasoningDelta = Number(a.reasoning) - Number(b.reasoning);
+	if (reasoningDelta !== 0) return reasoningDelta;
+
+	return a.selector.localeCompare(b.selector);
+}
+
+export function rankCandidates(models: Candidate[], limit = MAX_CANDIDATES): Candidate[] {
+	return [...models].sort(compareCandidates).slice(0, limit);
+}
+
+/** `free · 0.3M ctx · current — commandcode/ling-3.0-flash-sante:free` */
+export function formatCandidate(candidate: Candidate, currentSelector?: string): string {
+	const price = isFree(candidate)
+		? "free"
+		: `$${candidate.inputPerMTok}/$${candidate.outputPerMTok} per Mtok`;
+	const ctx =
+		candidate.contextWindow <= 0
+			? "ctx unknown"
+			: candidate.contextWindow < 1_000_000
+				? `${Math.round(candidate.contextWindow / 1000)}k ctx`
+				: `${(candidate.contextWindow / 1_000_000).toFixed(1)}M ctx`;
+	const flags = [
+		price,
+		ctx,
+		candidate.reasoning ? "reasoning" : null,
+		candidate.selector === currentSelector ? "current" : null,
+	].filter((part): part is string => part !== null);
+	return `${flags.join(" · ")} — ${candidate.selector}`;
+}
+
+/** `1.8s · commandcode/ling:free — "fix this and add tests"` */
+export function benchLine(result: BenchResult): string {
+	const elapsed = result.ms >= 1000 ? `${(result.ms / 1000).toFixed(1)}s` : `${result.ms}ms`;
+	if (result.error !== undefined) return `${elapsed} · ${result.selector} — failed: ${result.error}`;
+	return `${elapsed} · ${result.selector} — "${result.output}"`;
+}
+
+/** A zero-cost label is not a promise; say so before someone relies on one. */
+export function caveatFor(candidate: Candidate): string | undefined {
+	if (!isFree(candidate)) return undefined;
+	if (candidate.selector.includes("openrouter/") && candidate.selector.endsWith(":free")) {
+		return "OpenRouter :free models are shared-tier and rate-limited, and a zero-cost label can list a model the provider rejects — run /bench before relying on one.";
+	}
+	return "A zero-cost label can list a model the provider rejects — run /bench to confirm this one answers.";
 }

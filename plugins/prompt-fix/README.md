@@ -10,6 +10,8 @@ separate CLI.
 | `/polish:fix`       | `Alt+E`      | Spelling, grammar, and punctuation only; keeps the input language              |
 | `/polish:translate` | `Alt+T`      | Minimal Turkish/mixed → technical English translation                          |
 | `/polish:undo`      | `Alt+Shift+U`| Restore the draft from before the last rewrite                                  |
+| `/polish:model`     | —            | Rank models for `@promptfix` by price, or set one: `/polish:model <provider/id>` |
+| `/polish:bench`     | —            | Rewrite a sample through the top-ranked models and report latency and output   |
 
 `/promptfix` and `/pp` are aliases: every command above is also available as
 `/promptfix…` and `/pp…` (for example `/pp:translate <text>`). Use whichever root
@@ -68,6 +70,35 @@ Model fit matters more than raw capability here:
 
 Agentic coding models answer as if they were about to execute the task. If output ever sprouts
 preambles, point the role at a fast instruct model.
+
+### Finding a free or cheap model
+
+`/polish:model` reads the models your own registry can actually reach and ranks them: zero-cost
+first, then cheapest, then non-reasoning (a 4096-token text edit spends its budget on thinking for
+nothing). Bare, it opens a picker; with a selector it sets the role without a dialog:
+
+```
+/polish:model
+/polish:model commandcode/inclusionai/ling-3.0-flash-sante:free
+```
+
+> **A zero-cost label is not a guarantee.** The registry lists models as free that their providers
+> reject — three OpenRouter `:free` entries returned `404 … unavailable for free`, and one
+> `commandcode` entry answered `insufficient credits`. `/polish:model` shows a caveat with every
+> free pick for that reason.
+
+`/polish:bench` is how you find out for real: it runs the same sample rewrite through the top-ranked
+models and reports measured latency beside the text each one produced.
+
+```
+Rewrite of "fix this and add test" by 4 models:
+6.1s · commandcode/inclusionai/ling-3.1-flash:free — "Fix this and add a test."
+25.4s · commandcode/poolside/laguna-s-2.1-free — "Fix this and add a test."
+```
+
+Bench costs one small call per candidate and runs them in sequence, so it can take a minute or two.
+It is the only speed measurement available: the registry reports pricing and context size but no
+throughput, so the ranking deliberately does not claim to know which model is fastest.
 
 ### 2. Free `Alt+P` (optional)
 

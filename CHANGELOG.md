@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3
+
+- New `/polish:model` (also `/promptfix:model`, `/pp:model`): ranks the chat
+  models your own registry can reach, free first, then cheapest, then
+  non-reasoning. Bare it opens a picker; with a selector
+  (`/polish:model opencode-go/deepseek-flash`) it sets the role directly.
+- New `/polish:bench` (also `/promptfix:bench`, `/pp:bench`): runs the same
+  sample rewrite through the top-ranked models and reports measured latency and
+  the text each one produced. A zero-cost label is not a guarantee — three
+  OpenRouter `:free` models and one `commandcode` model listed as free were
+  rejected by their providers, and bench is what shows that.
+
 ## 0.1.2
 
 - Renamed the repository, marketplace, and plugin to `prompt-fix` (was

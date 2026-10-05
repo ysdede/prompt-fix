@@ -1,18 +1,27 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+// The extension loader rewrites this specifier onto the host's bundled copy.
+import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 import type { Api, AssistantMessage, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
 import { Key } from "@mariozechner/pi-tui";
 import {
+	BENCH_SAMPLE,
+	benchLine,
 	canApplyRewrite,
 	canUndoRewrite,
+	caveatFor,
 	cleanOutput,
 	COMMAND_ROOTS,
 	draftFrom,
+	formatCandidate,
 	MAX_UNDO_ENTRIES,
 	MODE_LABELS,
 	PROMPTFIX_ROLE,
+	rankCandidates,
 	userMessageFor,
 	systemPromptFor,
+	type BenchResult,
+	type Candidate,
 	type PolishMode,
 } from "./core.ts";
 
@@ -79,8 +88,12 @@ function textOf(message: AssistantMessage): string {
 		.join("");
 }
 
-async function requestRewrite(mode: PolishMode, draft: string, ctx: ExtensionContext): Promise<string> {
-	const model = resolveRoleModel(ctx, PROMPTFIX_ROLE);
+async function rewriteWith(
+	model: Model<Api>,
+	mode: PolishMode,
+	draft: string,
+	ctx: ExtensionContext,
+): Promise<string> {
 	const apiKey = await ctx.modelRegistry.getApiKey(model);
 	if (!apiKey) throw new Error(`No API key available for ${model.provider}/${model.id}`);
 
@@ -99,6 +112,10 @@ async function requestRewrite(mode: PolishMode, draft: string, ctx: ExtensionCon
 	);
 
 	return textOf(message);
+}
+
+function requestRewrite(mode: PolishMode, draft: string, ctx: ExtensionContext): Promise<string> {
+	return rewriteWith(resolveRoleModel(ctx, PROMPTFIX_ROLE), mode, draft, ctx);
 }
 
 function requireEditor(ctx: ExtensionContext): boolean {
@@ -182,6 +199,129 @@ function undo(ctx: ExtensionContext): void {
 	ctx.ui.notify("Restored the previous draft", "info");
 }
 
+const BENCH_COUNT = 4;
+
+function registryModels(ctx: ExtensionContext): Model<Api>[] {
+	const models = (ctx as unknown as { models?: { list(): Model<Api>[] } }).models;
+	return models?.list() ?? [];
+}
+
+/** Flattens the priced registry into ranked candidates, keeping each one addressable. */
+function rankedFrom(ctx: ExtensionContext): {
+	candidates: Candidate[];
+	bySelector: Map<string, Model<Api>>;
+} {
+	const bySelector = new Map<string, Model<Api>>();
+	const candidates: Candidate[] = [];
+	for (const model of registryModels(ctx)) {
+		const selector = `${model.provider}/${model.id}`;
+		bySelector.set(selector, model);
+		candidates.push({
+			selector,
+			inputPerMTok: model.cost?.input ?? 0,
+			outputPerMTok: model.cost?.output ?? 0,
+			reasoning: model.reasoning === true,
+			contextWindow: model.contextWindow ?? 0,
+		});
+	}
+	return { candidates: rankCandidates(candidates), bySelector };
+}
+
+function currentSelector(pi: ExtensionAPI): string | undefined {
+	const roles = lookup("modelRoles")?.get(pi.pi.settings);
+	if (typeof roles !== "object" || roles === null) return undefined;
+	const value = (roles as Record<string, unknown>)[PROMPTFIX_ROLE];
+	return typeof value === "string" ? value : undefined;
+}
+
+function setSelector(pi: ExtensionAPI, selector: string): void {
+	const roles = lookup("modelRoles");
+	if (!roles) throw new Error("This omp build exposes no modelRoles setting to write");
+	roles.setEntry(pi.pi.settings, PROMPTFIX_ROLE, selector);
+}
+
+function listCandidates(candidates: Candidate[], current?: string): string {
+	const lines = candidates.map((candidate) => formatCandidate(candidate, current));
+	return `${lines.join("\n")}\n\nSet one with /polish:model <provider/id>, or run /polish:bench to compare outputs.`;
+}
+
+async function pickModel(pi: ExtensionAPI, args: string, ctx: ExtensionContext): Promise<void> {
+	const { candidates, bySelector } = rankedFrom(ctx);
+	const current = currentSelector(pi);
+	const requested = args.trim();
+
+	if (requested) {
+		if (!bySelector.has(requested)) {
+			ctx.ui.notify(`${requested} is not an available model`, "error");
+			return;
+		}
+		setSelector(pi, requested);
+		ctx.ui.notify(`@${PROMPTFIX_ROLE} is now ${requested}`, "info");
+		return;
+	}
+
+	if (!ctx.hasUI) {
+		ctx.ui.notify(listCandidates(candidates, current), "info");
+		return;
+	}
+
+	let picked: string | undefined;
+	try {
+		picked = await ctx.ui.select({
+			message: `Model for @${PROMPTFIX_ROLE}${current === undefined ? "" : ` (now ${current})`}`,
+			options: candidates.map((candidate) => ({
+				label: formatCandidate(candidate, current),
+				value: candidate.selector,
+			})),
+		});
+	} catch {
+		// The select shape varies across omp builds; the list is always usable.
+		ctx.ui.notify(listCandidates(candidates, current), "info");
+		return;
+	}
+	if (picked === undefined) return;
+
+	setSelector(pi, picked);
+	const chosen = candidates.find((candidate) => candidate.selector === picked);
+	const caveat = chosen === undefined ? undefined : caveatFor(chosen);
+	ctx.ui.notify(
+		caveat === undefined ? `@${PROMPTFIX_ROLE} is now ${picked}` : `@${PROMPTFIX_ROLE} is now ${picked}. ${caveat}`,
+		caveat === undefined ? "info" : "warning",
+	);
+}
+
+async function benchModels(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+	const { candidates, bySelector } = rankedFrom(ctx);
+	const current = currentSelector(pi);
+	const shortlist = candidates.filter((candidate) => candidate.selector !== current).slice(0, BENCH_COUNT);
+	if (shortlist.length === 0) {
+		ctx.ui.notify("No other ranked models to bench", "info");
+		return;
+	}
+
+	ctx.ui.setStatus(STATUS_KEY, `Benching ${shortlist.length} models…`);
+	const results: BenchResult[] = [];
+	try {
+		for (const candidate of shortlist) {
+			const model = bySelector.get(candidate.selector);
+			if (model === undefined) continue;
+			const started = Date.now();
+			try {
+				const output = cleanOutput(await rewriteWith(model, "fix", BENCH_SAMPLE, ctx));
+				results.push({ selector: candidate.selector, ms: Date.now() - started, output });
+			} catch (error) {
+				const reason = error instanceof Error && error.message ? error.message : String(error);
+				results.push({ selector: candidate.selector, ms: Date.now() - started, output: "", error: reason });
+			}
+		}
+	} finally {
+		ctx.ui.setStatus(STATUS_KEY, undefined);
+	}
+
+	const header = `Rewrite of "${BENCH_SAMPLE}" by ${shortlist.length} models:`;
+	ctx.ui.notify(`${header}\n${results.map(benchLine).join("\n")}`, "info");
+}
+
 export default function promptPolishExtension(pi: ExtensionAPI) {
 	for (const { mode, suffix, shortcut, description } of MODES) {
 		for (const root of COMMAND_ROOTS) {
@@ -194,6 +334,17 @@ export default function promptPolishExtension(pi: ExtensionAPI) {
 		pi.registerShortcut(shortcut, {
 			description,
 			handler: (ctx) => execute(mode, "", ctx),
+		});
+	}
+
+	for (const root of COMMAND_ROOTS) {
+		pi.registerCommand(`${root}:model`, {
+			description: "Rank models for @promptfix by price, or set one: /polish:model <provider/id>",
+			handler: (args, ctx) => pickModel(pi, args, ctx),
+		});
+		pi.registerCommand(`${root}:bench`, {
+			description: "Rewrite a sample with the top-ranked models and report latency and output",
+			handler: (_args, ctx) => benchModels(pi, ctx),
 		});
 	}
 

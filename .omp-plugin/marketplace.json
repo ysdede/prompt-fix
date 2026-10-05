@@ -6,13 +6,13 @@
 	},
 	"metadata": {
 		"description": "Plugins for the omp coding agent.",
-		"version": "0.1.2",
+		"version": "0.1.3",
 		"pluginRoot": "./plugins"
 	},
 	"plugins": [
 		{
 			"name": "prompt-fix",
-			"version": "0.1.2",
+			"version": "0.1.3",
 			"description": "Rewrite the prompt in the editor: conservative polish, grammar/spelling fix, Turkish-to-English translation, and conditional undo.",
 			"source": "./prompt-fix",
 			"category": "productivity",

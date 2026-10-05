@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	canApplyRewrite,
+	benchLine,
 	canUndoRewrite,
+	caveatFor,
 	cleanOutput,
 	COMMAND_PREFIX,
 	draftFrom,
+	formatCandidate,
 	MAX_UNDO_ENTRIES,
 	MODE_LABELS,
 	PROMPTFIX_ROLE,
+	rankCandidates,
 	systemPromptFor,
 	userMessageFor,
+	type Candidate,
 	type PolishMode,
 } from "./core.ts";
 
@@ -115,4 +120,117 @@ test("the command prefix never eats a lookalike command", () => {
 	assert.equal("/pp hi".replace(COMMAND_PREFIX, ""), "hi");
 	assert.equal("/promptfixing hi".replace(COMMAND_PREFIX, ""), "/promptfixing hi");
 	assert.equal("/pp:unknown hi".replace(COMMAND_PREFIX, ""), "/pp:unknown hi");
+});
+
+test("the model and bench suffixes strip like every other command", () => {
+	assert.equal(draftFrom("/polish:model", ""), "");
+	assert.equal(draftFrom("/pp:bench", ""), "");
+	assert.equal("/polish:model provider/id".replace(COMMAND_PREFIX, ""), "provider/id");
+	assert.equal("/promptfix:modelx hi".replace(COMMAND_PREFIX, ""), "/promptfix:modelx hi");
+});
+
+function candidate(overrides: Partial<Candidate> & { selector: string }): Candidate {
+	return {
+		inputPerMTok: 1,
+		outputPerMTok: 2,
+		reasoning: false,
+		contextWindow: 200_000,
+		...overrides,
+	};
+}
+
+test("free and cheap candidates outrank expensive ones", () => {
+	const ranked = rankCandidates([
+		candidate({ selector: "paid/dear", inputPerMTok: 15, outputPerMTok: 75 }),
+		candidate({ selector: "free/b", inputPerMTok: 0, outputPerMTok: 0 }),
+		candidate({ selector: "paid/cheap", inputPerMTok: 0.1, outputPerMTok: 0.2 }),
+		candidate({ selector: "free/a", inputPerMTok: 0, outputPerMTok: 0 }),
+	]);
+	assert.deepEqual(
+		ranked.map((c) => c.selector),
+		["free/a", "free/b", "paid/cheap", "paid/dear"],
+	);
+});
+
+test("at equal price a non-reasoning model wins", () => {
+	const ranked = rankCandidates([
+		candidate({ selector: "reasoner", reasoning: true }),
+		candidate({ selector: "plain" }),
+	]);
+	assert.deepEqual(
+		ranked.map((c) => c.selector),
+		["plain", "reasoner"],
+	);
+});
+
+test("ranking is capped and never mutates the caller's list", () => {
+	const input = [
+		candidate({ selector: "a", inputPerMTok: 0, outputPerMTok: 0 }),
+		candidate({ selector: "b", inputPerMTok: 1, outputPerMTok: 1 }),
+	];
+	assert.equal(rankCandidates(input, 1).length, 1);
+	assert.equal(input.length, 2);
+	assert.equal(rankCandidates(input, 1)[0].selector, "a");
+});
+
+test("a candidate line shows price, size, and the current role", () => {
+	const free = candidate({
+		selector: "commandcode/ling:free",
+		inputPerMTok: 0,
+		outputPerMTok: 0,
+		contextWindow: 262_144,
+	});
+	assert.equal(
+		formatCandidate(free, "commandcode/ling:free"),
+		"free · 262k ctx · current — commandcode/ling:free",
+	);
+
+	const paid = candidate({
+		selector: "zai/glm",
+		inputPerMTok: 0.6,
+		outputPerMTok: 2.2,
+		contextWindow: 0,
+		reasoning: true,
+	});
+	const line = formatCandidate(paid, "other/model");
+	assert.match(line, /^\$0\.6\/\$2\.2 per Mtok · ctx unknown · reasoning — zai\/glm$/);
+	assert.doesNotMatch(line, /current/);
+});
+
+test("a small context window is shown in k, not as a rounded 0.0M", () => {
+	assert.equal(
+		formatCandidate(candidate({ selector: "a/tiny", inputPerMTok: 0, outputPerMTok: 0, contextWindow: 16_384 })),
+		"free · 16k ctx — a/tiny",
+	);
+	assert.match(
+		formatCandidate(candidate({ selector: "a/big", inputPerMTok: 0, outputPerMTok: 0, contextWindow: 1_048_576 })),
+		/^free · 1\.0M ctx — a\/big$/,
+	);
+});
+
+test("a bench line reports measured latency beside the rewrite it produced", () => {
+	assert.equal(
+		benchLine({ selector: "commandcode/ling:free", ms: 1800, output: "fix this and add tests" }),
+		'1.8s · commandcode/ling:free — "fix this and add tests"',
+	);
+	assert.equal(
+		benchLine({ selector: "openrouter/mistral:free", ms: 940, output: "", error: "404 unavailable for free" }),
+		"940ms · openrouter/mistral:free — failed: 404 unavailable for free",
+	);
+});
+
+test("every free candidate carries a caveat, and only shared-tier names mention rate limits", () => {
+	assert.match(
+		caveatFor(candidate({ selector: "openrouter/mistral:free", inputPerMTok: 0, outputPerMTok: 0 })) ?? "",
+		/rate-limited/,
+	);
+	assert.match(
+		caveatFor(candidate({ selector: "commandcode/gpt-6.1-sol", inputPerMTok: 0, outputPerMTok: 0 })) ?? "",
+		/provider rejects/,
+	);
+	assert.doesNotMatch(
+		caveatFor(candidate({ selector: "commandcode/gpt-6.1-sol", inputPerMTok: 0, outputPerMTok: 0 })) ?? "",
+		/rate-limited/,
+	);
+	assert.equal(caveatFor(candidate({ selector: "zai/glm", inputPerMTok: 1, outputPerMTok: 1 })), undefined);
 });
